@@ -1,4 +1,4 @@
-# SDS383D, Spring 2017
+# SDS 383D, Spring 2017
 
 I am Giorgio Paulon, 1st year PhD student in Statistics at UT Austin. This is my personal page for the Statistical Modeling II class with Prof. James Scott.
 
