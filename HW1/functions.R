@@ -1,6 +1,79 @@
 
 
+boot.res <- function(X, y, B = 1e4){
+  # Computes the bootstrapped estimated covariance of beta.hat, sampling the residuals
+  # ----------------------------------------------------------------------------------
+  # Args: 
+  #   - X: matrix of the features (n*p)
+  #   - y: vector of responses
+  #   - B: number of bootstrap iterations
+  # Returns: 
+  #   - cov.boot: estimated covariance matrix of the MLE
+  # ----------------------------------------------------
+  n <- nrow(X)
+  p <- ncol(X) - 1
+  
+  # Calculate beta.hat
+  XtXinv <- solve(crossprod(X))
+  beta.hat <- XtXinv %*% crossprod(X, y)
+  
+  # Calculate predicted values and residuals
+  y.hat <- X %*% beta.hat
+  res <- y - y.hat
+  
+  beta.boot <- matrix(nrow = B, ncol = p + 1)
+  for(i in 1:B) {
+    idx <- sample(1:n, n, replace = T)
+    res.boot <- res[idx]
+    
+    y.boot <- y.hat + res.boot
+    beta.boot[i, ] <- XtXinv %*% crossprod(X, y.boot)
+  }
+  cov.boot <- cov(beta.boot)
+  
+  return(cov.boot)
+}
+
+boot.xy <- function(X, y, B = 1e4){
+  # Computes the bootstrapped estimated covariance of beta.hat, sampling (X, y)
+  # ---------------------------------------------------------------------------
+  # Args: 
+  #   - X: matrix of the features (n*p)
+  #   - y: vector of responses
+  #   - B: number of bootstrap iterations
+  # Returns: 
+  #   - cov.boot: estimated covariance matrix of the MLE
+  # ----------------------------------------------------
+  n <- nrow(X)
+  p <- ncol(X) - 1
+  
+  beta.boot <- matrix(nrow = B, ncol = p + 1)
+  for(i in 1:B) {
+    idx <- sample(1:n, n, replace = T)
+    
+    X.boot <- X[idx, ]
+    y.boot <- y[idx]
+    
+    XtX.boot <- crossprod(X.boot)
+    
+    beta.boot[i, ] <- as.numeric(solve(XtX.boot) %*% crossprod(X.boot, y.boot))
+  }
+  cov.boot <- cov(beta.boot)
+  
+  return(cov.boot)
+}
+
+
 rmultinorm <- function(n, mean, sigma){
+  # Randomly generates a sample from a multivariate normal distribution via Choleski
+  # --------------------------------------------------------------------------------
+  # Args: 
+  #   - n: number of desired samples
+  #   - mean: vector of means
+  #   - sigma: covariance matrix
+  # Returns: 
+  #   - res: random sample N(mean, sigma)
+  # -------------------------------------
   p <- length(mean)
   res <- array(NA, dim = c(n, p))
   
@@ -10,45 +83,9 @@ rmultinorm <- function(n, mean, sigma){
   L <- chol(sigma)
   res <- res %*% L
   res <- t(mean + t(res))
+  
+  return (res)
 }
 
 
-norm.loglik <- function(params, X){
-  n <- dim(X)[1]
-  p <- dim(X)[2]
-  mean <- params[1:p]
-  lag <- 1
-  sigma <- matrix(0, nrow = p, ncol = p)
-  for (i in 1:p){
-    for (j in i:p){
-      sigma[i,j] <- sigma[j,i] <- params[p + lag]
-      lag <- lag + 1
-    }
-  }
-  
-  if (det(sigma) < 0){
-    loglik <- 1000
-  }
-  else{
-    sigmainv <- solve(sigma)
-    loglik <- array(NA, dim = n)
-    for (i in 1:n){
-      loglik[i] <- (X[i,] - mean) %*% sigmainv %*% (X[i,] - mean)
-    }
-    loglik <- (n/2) * log(det(sigma)) + (1/2) * sum(loglik)
-  }
-  
-  return (loglik)
-}
-
-my.MLE <- function(sample){
-  
-  mu <- colMeans(sample)
-  Sigma <- cov(sample)
-  
-  # res <- optim(par = c(0,0,1,0,1), fn = norm.loglik, X = sample, method = 'Nelder-Mead')
-  # res$par
-  # res$value
-  return (list('mu' = mu, 'Sigma' = Sigma))
-}
 

@@ -50,6 +50,7 @@ rownames(comp)[1] <- "Intercept"
 #################
 
 rm(list=ls())
+source('SDS383D/HW1/functions.R')
 
 # Load the data
 ozone = data(Ozone, package='mlbench')
@@ -69,45 +70,25 @@ p <- dim(x)[2] - 1
 # FIRST METHOD:
 # Nonparametric Bootstrap, by considering the vector (X, Y) as random
 
-betahat = solve(crossprod(x)) %*% t(x) %*% y
+
+betacov.boot <- boot.xy(x, y, 10000)
+
+XtXinv <- solve(crossprod(x))
+betahat = XtXinv %*% t(x) %*% y
 sigmahat <- sum((y - x %*% betahat)^2)/(n - p + 1)
 betacov = sigmahat * solve(crossprod(x))
-
-
-B <- 10000
-boot.betacov <- matrix(rep(0, (p+1)*(p+1)), p+1, p+1)
-for (b in 1:B){
-  idx <- sample(1:n, n, replace = T)
-  betahat = solve(t(x[idx,]) %*% x[idx,]) %*% t(x[idx,]) %*% y[idx]
-  sigmahat <- sum((y[idx] - x[idx,] %*% betahat)^2)/(n - p + 1)
-  boot.betacov = boot.betacov + sigmahat * solve(crossprod(x[idx,]))
-}
-boot.betacov <- boot.betacov/B
-MSE <- mean((betacov - boot.betacov)^2)
 
 
 # SECOND METHOD:
 # Nonparametric Bootstrap, by considering X fixed, and resampling only the residuals
 # from their empirical cdf
 
-betahat = solve(crossprod(x)) %*% t(x) %*% y
+betacov.boot <- boot.res(x, y, 10000)
+
+XtXinv <- solve(crossprod(x))
+betahat = XtXinv %*% t(x) %*% y
 sigmahat <- sum((y - x %*% betahat)^2)/(n - p + 1)
-betacov = sigmahat * solve(crossprod(x))
-
-res <- y - x %*% betahat
-
-B <- 10000
-boot.betacov <- matrix(rep(0, (p+1)*(p+1)), p+1, p+1)
-for (b in 1:B){
-  res.new <- sample(res, n, replace = T)
-  y.new <- x %*% betahat + res.new
-  betahat.boot = solve(crossprod(x)) %*% t(x) %*% y.new
-  sigmahat <- sum((y.new - x %*% betahat.boot)^2)/(n - p + 1)
-  boot.betacov = boot.betacov + sigmahat * solve(crossprod(x))
-}
-boot.betacov <- boot.betacov/B
-MSE <- mean((betacov - boot.betacov)^2)
-toLatex(xtable(boot.betacov, align = '|c|c|c|c|c|c|c|c|c|c|c|', digits = 4))
+betacov = sigmahat * XtXinv
 
 
 # BOOTSTRAPPING THE MLE:
@@ -118,22 +99,27 @@ source('./SDS383D/HW1/functions.R')
 N <- 200
 p <- 2
 mu = c(-5, 5)
-sigma = matrix(c(0.75, 0.2, 0.2, 0.75), 2, 2, byrow = T)
-X <- rmvnorm(N, mu, sigma)
+s = matrix(c(0.75, 0.2, 0.2, 0.75), 2, 2, byrow = T)
+X <- rmultinorm(N, mu, sigma)
 
 B <- 10000
-boot.mu <- rep(0, p)
-boot.sigma <- matrix(rep(0, p*p), p, p)
+mu.hat <- array(NA, dim = c(B, p))
+sigma.hat <- array(NA, dim = c(B, p * p))
 for (b in 1:B){
   boot.X <- X[sample(1:N, size = N, replace = T),]
-  mle <- my.MLE(boot.X)
-  boot.mu <- boot.mu + mle$mu
-  boot.sigma <- boot.sigma + mle$Sigma
+  mu.hat[b,] <- as.numeric(colMeans(boot.X))
+  sigma.hat[b,] <- as.numeric(cov(boot.X))
 }
-boot.mu <- boot.mu/B
-boot.sigma <- boot.sigma/B
 
+colMeans(mu.hat)
 
+par(mar=c(2,4,2,2), mfrow = c(2,1))
+hist(mu.hat[,1], border = 'white', col = 'gray', xlab = '', nclass = 20, freq = F, main = bquote('Histogram of'~hat(mu)[1]))
+abline(v = colMeans(mu.hat)[1], lwd = 2, col = 'firebrick3')
+hist(mu.hat[,2], border = 'white', col = 'gray', xlab = '', nclass = 20, freq = F, main = bquote('Histogram of'~hat(mu)[2]))
+abline(v = colMeans(mu.hat)[2], lwd = 2, col = 'firebrick3')
+
+matrix(colMeans(sigma.hat), 2, 2, byrow = T)
 
 
 
