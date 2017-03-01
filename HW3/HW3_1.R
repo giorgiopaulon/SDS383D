@@ -227,9 +227,10 @@ fit <- polregr(x, y, x, D, h.opt)
 y.pred <- fit$ynew
 H <- fit$H
 sigma2hat <- sum((y - as.numeric(H %*% y))^2) / (n - 2 * sum(diag(H)) + sum(diag(crossprod(H))))
+sigma2x <- rowSums(H^2)[order(x)]
 
 par(mar=c(4,4,2,2), family = 'Palatino', cex = 1.1)
-plot(x, y, pch = 16, cex = 0.8, xlab = 'Average Temperature', ylab = 'Average daily gas bill')
+plot(x, y, pch = 16, cex = 0.8, xlab = 'Average Temperature', ylab = 'Average daily gas bill', ylim = c(min(y), 2.4))
 lines(sort(x), y.pred[order(x)], lwd = 2, col = 'firebrick2')
-polygon(c(rev(sort(x)), sort(x)), c(rev(y.pred[order(x)] - sqrt(sigma2hat) * qnorm(0.975)), y.pred[order(x)] + sqrt(sigma2hat) * qnorm(0.975)), col = rgb(0.83, 0.83, 0.83, 0.5), border = rgb(0.83, 0.83, 0.83, 0.5))    
+polygon(c(rev(sort(x)), sort(x)), c(rev(y.pred[order(x)] - sqrt(sigma2x) * sqrt(sigma2hat) * qnorm(0.975)), y.pred[order(x)] + sqrt(sigma2x) * sqrt(sigma2hat) * qnorm(0.975)), col = rgb(0.83, 0.83, 0.83, 0.5), border = rgb(0.83, 0.83, 0.83, 0.5))    
 
