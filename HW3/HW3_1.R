@@ -234,3 +234,14 @@ plot(x, y, pch = 16, cex = 0.8, xlab = 'Average Temperature', ylab = 'Average da
 lines(sort(x), y.pred[order(x)], lwd = 2, col = 'firebrick2')
 polygon(c(rev(sort(x)), sort(x)), c(rev(y.pred[order(x)] - sqrt(sigma2x) * sqrt(sigma2hat) * qnorm(0.975)), y.pred[order(x)] + sqrt(sigma2x) * sqrt(sigma2hat) * qnorm(0.975)), col = rgb(0.83, 0.83, 0.83, 0.5), border = rgb(0.83, 0.83, 0.83, 0.5))    
 
+# In alternative, we can fit a regression model for the variance.
+# Z = log((y - hat(y))^2)
+# E(e^2) = exp(g(x))
+
+# Fit the log residuals and not the residuals: working on the log scale is enforcing 
+# the constraint that the variance is positive.
+
+# Try to use a compact support kernel. Careful: there is a minimum bandwidth to use 
+# because some points can have no neighbours and the numerical conditioning of the 
+# matrices has to be checked.
+

@@ -178,6 +178,3 @@ cv.polregr <- function(x, y, D, hgrid, type = 'gaussian'){
   
   return (LOOCV)
 }
-
-
-
