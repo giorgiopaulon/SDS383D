@@ -78,6 +78,7 @@ abline(0, 1, col = 'indianred3', lwd = 2)
 # slightly less high values of the Bayesian estimates of theta_i; low values 
 # of ybar_i correspond to slightly less low values of the Bayesian estimates of 
 # theta_i. This is the shrinkage effect towards the grand mean (partial pooling).
+# The farther away from the mean you are, the more you are shrunk.
 
 #pdf('./SDS383D/HW4/Notes/Img/shrinkage.pdf', width = 8.5, height = 6)
 par(mar=c(4,4,2,2), family = 'Palatino', cex = 1.1)
@@ -90,25 +91,8 @@ abline(h=0, lwd = 2, col = 'indianred3')
 # rest of the population.
 
 
-
-rm(list=ls())
-library(lme4)
-# ======================================
-# ==== Price elasticity of demand:  ====
-# ======================================
-
-cheese <- read.csv(file = 'SDS383D-master/data/cheese.csv')
-
-y <- log(cheese$price)
-ybar <- aggregate(y, list(cheese$store), mean)$x
-ni <- as.numeric(table(cheese$store))
-n <- sum(ni)
-I <- length(unique(cheese$store))
-
-X <- cbind(rep(1, n), log(cheese$vol), cheese$disp)
-
-cheese$vol <- log(cheese$vol)
-cheese$price <- log(cheese$price)
-hlm = lmer(price ~ vol + disp + (1 + vol | store), data=cheese)
-
-
+# Let us see how the shrinkage effect affects the posterior estimates
+par(mar=c(2,2,1,1))
+boxplot(y ~ math$school, col = 'gray', pch = 16, cex = 0.8, lwd = 1.2)
+points(1:I, colMeans(thetas.chain), col = 'indianred3', pch = 16, cex = 0.8)
+abline(h = mean(mu.chain), col = 'dodgerblue3', lwd = 2)
