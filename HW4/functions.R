@@ -38,8 +38,8 @@ gibbs.HLM <- function(yi, Xi, Zi, ni, store, Niter, burnin, thin){
   # --------------------
 
   n <- sum(ni)
-  p <- dim(Xi[[1]])[2]
-  q <- dim(Zi[[1]])[2]
+  p <- ifelse(length(dim(Xi[[1]])[2]) > 0, dim(Xi[[1]])[2], 1)
+  q <- ifelse(length(dim(Zi[[1]])[2]) > 0, dim(Zi[[1]])[2], 1)
   I <- length(ni)
   
   # Initialize the chain
@@ -192,6 +192,100 @@ gibbs.probit <- function(yi, Xi, Wi, ni, state, Niter, burnin, thin){
     }
     y.pred[iter, y.pred[iter,] > 0] <- 1
     y.pred[iter, y.pred[iter,] < 0] <- 0
+    z.chain[z.chain == +Inf] <- 10
+    z.chain[z.chain == -Inf] <- -10
+    
+    setTxtProgressBar(pb, iter/Niter)
+  }
+  # Thin the chains
+  betas.chain <- betas.chain[seq(burnin + 1, Niter, by = thin),]
+  gammas.chain <- gammas.chain[seq(burnin + 1, Niter, by = thin),,]
+  Sigmainv.chain <- Sigmainv.chain[seq(burnin + 1, Niter, by = thin),,]
+  y.pred <- y.pred[seq(burnin + 1, Niter, by = thin),]
+  
+  return(list('betas.chain' = betas.chain, 'gammas.chain' = gammas.chain, 'Sigmainv.chain' = Sigmainv.chain, 'y.pred' = y.pred))
+}
+
+
+
+gibbs.HLM <- function(yi, Xi, Wi, ni, state, Niter, burnin, thin){
+  # Gibbs Sampler for the Probit model
+  # ----------------------------------
+  # Args:
+  #   - yi: list of response variables grouped by state
+  #   - Xi: list of fixed effects covariate matrices grouped by state
+  #   - Wi: list of random effects covariate matrices grouped by state
+  #   - ni: group sample sizes
+  #   - state: indicator for the groups
+  #   - Niter, burnin, thin: MCMC parameters
+  # Returns:
+  #   - fit: MCMC output
+  # --------------------
+  n <- sum(ni)
+  p <- dim(Xi[[1]])[2]
+  q <- dim(Wi[[1]])[2]
+  I <- length(ni)
+  
+  # Initialize the chain
+  betas.chain <- array(NA, dim = c(Niter, p))
+  gammas.chain <- array(NA, dim = c(Niter, q, I))
+  Sigmainv.chain <- array(NA, dim = c(Niter, q, q))
+  z.chain <- array(NA, dim = n)
+  y.pred <- array(NA, dim = c(Niter, n))
+  betas.chain[1,] <- matrix(rep(0, p))
+  gammas.chain[1,,] <- matrix(rep(0, I*q))
+  Sigmainv.chain[1,,] <- diag(rep(0.1, q))
+  z.chain[y == 1] <- 1
+  z.chain[y == 0] <- -1
+  
+  # Hyperparameters
+  nu <- q + 1
+  psi <- diag(rep(1, q))
+  
+  # Precaching operations
+  SS <- 0
+  for (i in 1:I){
+    SS <- SS + crossprod(Xi[[i]])
+  }
+  SSinv <- solve(SS)
+  
+  pb <- txtProgressBar(style = 3)
+  for (iter in 2:Niter){
+    # Update beta
+    var.post <- SSinv
+    mean.post <- 0
+    for (i in 1:I){
+      bi <- z.chain[state == i] - as.numeric(Wi[[i]] %*% gammas.chain[iter-1,,i])
+      mean.post <- mean.post + crossprod(Xi[[i]], bi)
+    }
+    mean.post <- SSinv %*% mean.post
+    betas.chain[iter,] <- rmvnorm(1, mean.post, var.post)
+    
+    # Update the gamma_i's
+    Sigmainv <- Sigmainv.chain[iter-1,,]
+    for (i in 1:I){
+      mi <- z.chain[state == i] - as.numeric(Xi[[i]] %*% betas.chain[iter,])
+      var.post <- solve(crossprod(Wi[[i]]) + Sigmainv)
+      mean.post <- as.numeric(var.post %*% crossprod(Wi[[i]], mi))
+      gammas.chain[iter,,i] <- rmvnorm(1, mean.post, var.post)
+    }
+    
+    # Update Sigma
+    S.gamma <- tcrossprod(gammas.chain[iter,,])
+    Sigmainv.chain[iter,,] <- rwish(nu + I, psi + S.gamma)
+    
+    # We impute the missing values
+    #y[idx.na] <- as.numeric(z.chain[idx.na] <= 0)
+    
+    # Update the z_i's
+    for (i in 1:I){
+      low <- rep(0, ni[i]); low[yi[[i]] == 1] <- 0; low[yi[[i]] == 0] <- -Inf
+      upp <- rep(0, ni[i]); upp[yi[[i]] == 1] <- +Inf; upp[yi[[i]] == 0] <- 0
+      
+      prob <- pnorm(as.numeric(Xi[[i]] %*% betas.chain[iter,] - Wi[[i]] %*% gammas.chain[iter,,i]))
+      y.pred[iter, state == i] <- rbinom(ni[i], 1, prob)
+      z.chain[state == i] <- rtrnorm(ni[i], as.numeric(Xi[[i]] %*% betas.chain[iter,] - Wi[[i]] %*% gammas.chain[iter,,i]), rep(1, ni[i]), low, upp)
+    }
     z.chain[z.chain == +Inf] <- 10
     z.chain[z.chain == -Inf] <- -10
     
