@@ -1,0 +1,630 @@
+---
+title: "Bayesian Techniques for Variable Selection"
+author: 
+- name: Giorgio Paulon
+  affiliation: The University of Texas at Austin
+date: May 13, 2016
+
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+    theme: spacelab
+    highlight: default
+bibliography: bibliography.bib
+header-includes:
+- \usepackage{amsmath}
+- \usepackage{setspace}
+- \usepackage{avant}
+- \usepackage{bm}
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(dev = 'pdf')
+options(warn=-1)
+```
+
+```{r, echo = F, include = FALSE}
+setwd('~/Desktop/Semester 2/Statistical Modeling II/Project/')
+
+library(RColorBrewer)
+library(mvtnorm)
+library(plotrix)
+library(MCMCpack)
+```
+
+## Introduction
+
+Bayesian variable selection for the normal linear model has a long history, and several approaches are possible. The goal of this review is to present the history of Bayesian techniques for variable selection, along with their weaknesses and possible solutions when the complexity of the data is increased. The outline will be structured as follows:
+
+ + the model based approaches, that allow to compare models and to find analytical expressions for the posterior model probabilities;
+ + the spike and slab priors and the MCMC strategies to sample from the corresponding posterior distributions;
+ + an EM algorithm that allows to extend the spike and slab priors in high dimensional cases, also when $p > n$. 
+
+The regression framework can encompass a wide variety of response variables. One can easily see that, apart from the Gaussian linear model, the extension to binary (e.g. via logit or probit link functions) or count response is straightforward. In fact, these models are simply hierarchical models built on top of an underlying linear regression.
+
+An excellent review of variable selection methods in the Bayesian framework is given by @rockova2012hierarchical.
+
+## The general framework
+
+Let us consider a $n \times 1$ response vector $\mathbf{y}$, and a $n \times (p+1)$ design matrix $X = [\mathbf{1}, \mathbf{x}_1, \dots, \mathbf{x}_p]$ made of $p$ potential predictors plus an intercept. The assumption from now on is that data arise from the Gaussian linear model
+$$f(\mathbf{y} | \boldsymbol{\beta}, \sigma) = N_n (X \boldsymbol{\beta}, \sigma^2 I_n),$$
+where $\boldsymbol{\beta}$ is a vector of unknown regression coefficients. In the following, we will always assume that the predictors (except the intercept) have been standardized to have mean $0$ and variance $1$. This is a standard procedure when dealing with variable selection or shrinkage, since the variables have to be on the same scale. 
+
+All Bayesian variable selection problem is facilitated by the introduction of a vector of binary latent variables $\boldsymbol{\gamma} = (1, \gamma_1, \dots, \gamma_p)^T, \gamma_i \in \{0, 1\}$, where $\gamma_i = 1$ denotes that the covariate $\mathbf{x}_i$ is included in the model. Notice that we will assume that the intercept has to be included in each model, i.e. $\gamma_0 = 1$. Therefore the vector $\boldsymbol{\gamma}$ denotes a model, which is then characterized by a specific linear combination of the covariates, i.e. $X_{\boldsymbol{\gamma}}^T \boldsymbol{\beta}_{\boldsymbol{\gamma}}$, where $X_{\boldsymbol{\gamma}}$ and $\boldsymbol{\beta}_{\boldsymbol{\gamma}}$ denote subvectors of covariates and of regression parameters. A complication in every variable selection problem is the existence of $2^p$ possible models to test or to explore (in the case of an MCMC strategy).
+
+
+## The model space approach
+
+A natural way to compare models in a Bayesian framework is to assign them a prior and to inspect the posterior model probabilities. In other words, one could seek
+$$p (\boldsymbol{\gamma}_k | \mathbf{Y}) = \dfrac{p ( \mathbf{Y} | \boldsymbol{\gamma}_k) p(\boldsymbol{\gamma}_k)}{\sum_k p ( \mathbf{Y} | \boldsymbol{\gamma}_k) p(\boldsymbol{\gamma}_k)}, \qquad \forall k \in \{1, \dots, 2^p\}$$
+where 
+$$p (\mathbf{Y} | \boldsymbol{\gamma}_k) = \int p(\mathbf{Y} | \boldsymbol{\gamma}_k,  \boldsymbol{\beta}_{\boldsymbol{\gamma}}, \sigma) p(\boldsymbol{\beta}_{\boldsymbol{\gamma}}, \sigma | \boldsymbol{\gamma}_k) d(\boldsymbol{\beta}_{\boldsymbol{\gamma}}, \sigma)$$
+
+### The original spike and slab formulation
+
+One of the first approaches to variable selection was given by @mitchell1988bayesian. Their paper is also introducing for the first time the notion of spike and slab prior for variable selection. In the original formulation, they require that the distribution of each $\beta_i, \forall i = 1, \dots, p$ include a discrete probability mass at the point $0$. In particular, the individual $\beta_i$'s are mutually independent, and each one of them has density
+$$P(\beta_i = c) = 
+\begin{cases}
+h_{0j} \quad & \text{if } c = 0
+\\
+h_{1j} \quad & \text{if } - f_j < c < f_j, c \neq 0.
+\end{cases}$$
+In other words, the prior for each $\beta_i$ is a mixture of a point mass in $0$ and a uniform distribution between $-f_j$ and $f_j$. Usually, $f_j$ is taken as a very large value for all $j$, to specify prior vagueness about the value of $\beta_j$ when the corresponding predictor has to be included in the model. The distribution can be parametrized as a function of $f_j$ and $\phi_j = h_{0j}/h_{1j}$.
+
+```{r, echo = F}
+h0 <- 10
+h1 <- 1
+par(mar=c(4,4,2,2), cex = 1.1, family = 'Palatino')
+plot(0, h0, type = 'p', pch = 16, xlim = c(-20, 20), ylim = c(0, h0), col = 'firebrick2', ylab = 'Density', xlab = bquote(beta[j]), xaxt = 'n', main = 'Original Spike & Slab')
+polygon(x = c(-10, -10, 10, 10), y = c(0, h1, h1, 0), lwd = 2, density = 2, col = 'darkorange2', lty = 1, angle = 45)
+abline(v=0, h=0)
+axis(1, at = c(-10, 10), labels = as.expression(c(bquote(-f[j]), bquote(f[j]))))
+text(x = 2, y = h0 - 0.5, labels = bquote(h[0~j]))
+text(x = 5, y = h1 + 0.5, labels = bquote(h[1~j]))
+text(x = -2.5, y = h1 - 0.5, labels = bquote(2~f[j]~h[1~j]))
+```
+
+As one can see in the figure above, $h_{0j}$ and $h_{1j}$ represent the heights of the spike and of the slab, respectively, and $\phi_j$ is their ratio. Since the ''spike and slab'' density has to integrate to $1$, we know that 
+\begin{align*}
+& h_{0j} + 2 f_j h_{1j} = 1
+\\
+\Rightarrow & h_{1j} = \dfrac{1 - h_{0j}}{2 f_j}
+\\
+\Rightarrow & \phi_j = \dfrac{h_{0j}}{h_{1j}} = \dfrac{2 f_j h_{0j}}{1 - h_{0j}}.
+\end{align*}
+
+In this context one can specify a prior over the possible submodels, that is
+\begin{align*}
+P (\boldsymbol{\gamma}) &= \prod_{j: \gamma_j = 0} h_{0j} \prod_{j: \gamma_j = 1} 2 f_j h_{1j}
+\\
+&= \prod_{j: \gamma_j = 0} h_{0j} \prod_{j: \gamma_j = 1} 2 f_j \prod_{j} h_{1j} \prod_{j: \gamma_j = 0} \dfrac{1}{h_{1j}}
+\\
+&= \prod_{j: \gamma_j = 0} \phi_j \prod_{j: \gamma_j = 1} 2 f_j \prod_{j} h_{1j}
+\\
+&= \prod_{j: \gamma_j = 0} \phi_j \prod_{j: \gamma_j = 1} 2 f_j \prod_{j} (\phi_j + 2 f_j)^{-1}.
+\end{align*}
+
+In @mitchell1988bayesian an explicit expression for $P(\boldsymbol{\gamma} | \mathbf{y})$ is obtained. This is simply the result of integrating out, from the normal likelihood $p(\mathbf{y} | \boldsymbol{\beta}, \boldsymbol{\gamma}, \sigma)$, the parameters $(\boldsymbol{\beta}, \sigma)$ in order to get the marginal likelihood of the data under a certain model. Then, applying Bayes' rule, it is easy to find a posterior distribution over the possible $2^p$ models. To complete the model, we also need a prior distribution on $\sigma$, and the authors choose 
+$$\log(\sigma) \sim \mathcal{U} (-\log(\sigma_0), \log(\sigma_0)),$$
+where $\sigma_0$ is chosen to be large. Under the described prior specification, simple calculations yield to the posterior probabilities for each model, i.e.
+$$p(\boldsymbol{\gamma} | \mathbf{y}) \propto \left( \prod_{j: \gamma_j = 0} \phi_j \right) \cdot \pi^{k_\boldsymbol{\gamma}/2} \cdot \Gamma \left( \dfrac{n - k_\boldsymbol{\gamma}}{2} \right) |X_{\boldsymbol{\gamma}}^T X_{\boldsymbol{\gamma}}|^{-1/2} (S_\boldsymbol{\gamma}^2)^{- (n -k_\boldsymbol{\gamma})/2}$$
+where $k_\boldsymbol{\gamma}$ denotes the number of predictors included in the model $\boldsymbol{\gamma}$ and $S_\boldsymbol{\gamma}^2$ is the residual sum of squares for the model $\boldsymbol{\gamma}$, that is $S_\boldsymbol{\gamma}^2 = (\mathbf{y} - X_{\boldsymbol{\gamma}} \widehat{\boldsymbol{\beta}}_{\boldsymbol{\gamma}})^T (\mathbf{y} - X_{\boldsymbol{\gamma}} \widehat{\boldsymbol{\beta}}_{\boldsymbol{\gamma}})$.
+
+
+Once the model is estimated, the variable selection can then proceed in different ways:
+
+1. Highest posterior Density (**HPD**): pick the model with highest posterior density, that is choose $\boldsymbol{\gamma}^{\star} \text{ s.t. } p(\boldsymbol{\gamma}^{\star} | \mathbf{y})$ is maximum;
+
+2. Median probability Model (**MPM**): pick variables with estimated posterior probabilities higher than a certain threshold, usually $0.5$; in other words, retain in the model all the $\beta_k \text{ s.t. } p(\gamma_k | \mathbf{y}) > 0.5$.
+
+3. Hard Shrinkage (**HS**): when also inference on the regression parameters $\boldsymbol{\beta}$ is available, one can proceed by including variables whose posterior point estimate (e.g. the posterior mean) exceeds in absolute value a certain threshold.
+
+### Bayes Factors
+
+When the primary goal rests purely on model selection, the natural way to achieve it in a Bayesian context are Bayes Factors, that are basically ratios of marginal likelihoods. As discussed in literature, in this context one is restricted to use proper priors for model-specific parameters because otherwise the marginal likelihoods are arbitrary. @liang2008mixtures introduce a framework in which one could use a special prior (mixtures of g-priors) in order to do model selection and also average the model specific estimates over the possible models. 
+
+In particular, the paper introduces a prior for the regression coefficients $\boldsymbol{\beta}$ that allows for an easy approximation of Bayes factors in order to compare pairs of models. Afterwards, one can pick the ''best'' model, which allows for the interpretation of the significant variables. In practice, however, one does not need to restrict to a particular model but can average the estimates over all of the possible models. In @liang2008mixtures it is presented a very simple way to do so. Moreover, the family of mixtures of g-priors is more robust than a g-prior itself, as the first does not need to specify a value of $g$ but puts a hyperprior on it. 
+
+
+### Extensions and problems of this approach
+
+It is clear that this strategy cannot work when $p$ is high-dimensional. First of all, from a computational point of view, the calculation of $2^p$ probabilities can be cumbersome. Moreover, the large support of $\boldsymbol{\gamma}$ makes the probabilities $P(\boldsymbol{\gamma} | \mathbf{y})$ meaningless as they will tend to approach $0$. 
+
+An attempt to generalize this deterministic procedure was given with a MCMC scheme for variable selection, known as $MC^3$ [see @madigan1995bayesian for the details]. This algorithm generates a MCMC chain $\boldsymbol{\gamma}^{(1)}, \dots, \boldsymbol{\gamma}^{(N)}$ of visited models via a Metropolis-Hastings algorithm. Since the proposal distribution is centered on the current state $\boldsymbol{\gamma}$, this approach searches at each step models that differ by an inclusion or an expulsion of just one variable. Therefore, this method suffers from slow mixing and is not suitable in high dimensional problems. Moreover, this approach can be useful for model selection but is not suitable for estimation. In fact, even though the parameters can be obtained by post-model selection estimation, every procedure that does not include the uncertainty over the model selection leads to biased results. In order to be coherent, one would want to average the estimates over all models (Bayesian model averaging). 
+
+
+## Variable Selection priors
+
+In order to overcome the problem just mentioned, and so to combine model averaging and variable selection, we present here the so-called variable selection priors. These will allow on one hand to highlight the ''best'' model among the ones proposed, and on the other hand to average the estimates over all possible models.
+
+### Stochastic Search Variable Selection (SVSS)
+
+The first stochastic alternative to the original approach by @mitchell1988bayesian was given by @george1993variable, who introduce a MCMC strategy which serves to this purpose. In particular, to make the computation feasible, they relax the assumption of a point mass spike distribution and they use two continuous distributions instead. The spike will concentrate closely around $0$ by having a small variance and will reflect the absence of the corresponding variable in the model. The slab component, instead, has a variance sufficiently large to allow the variable in the model. In general, spike and slab priors can be interpreted as normal scale mixtures specified through the prior on hyperparameters. The first family of spike and slab priors, namely SVSS, has the following specification:
+
+\begin{align*}
+&\beta_k | \lambda_k \sim N(0, \lambda_k)
+\\
+&\lambda_k | c_k, \tau_k^2, \gamma_k \sim (1 - \gamma_k) \delta_{\tau_k^2} (\cdot) + \gamma_k \delta_{c_k^2 \tau_k^2} (\cdot)
+\\
+&\gamma_k | w_k \sim \text{Be} (w_k)
+\\
+&w_k \sim \mathcal{U} (0, 1)
+\end{align*}
+
+```{r, echo = F}
+# Delta is the threshold to declare a beta_i significant
+delta <- 0.1
+c <- 10
+
+# We compute consequently tau
+eps <- sqrt(2*log(c)*c^2/(c^2-1))
+tau <- delta/eps
+
+# Plot the chosen spike & slab configuration
+par(mar=c(4,4,2,2), cex = 1.1, family = 'Palatino')
+xgrid <- seq(-1, 1, length.out = 200)
+plot(xgrid, dnorm(xgrid, 0, tau), col='firebrick2', type = 'l', lwd=2, main='Spike & Slab SVSS', ylab='Density', xlab = bquote(beta[j]))
+lines(xgrid, dnorm(xgrid, 0, c*tau), col='dodgerblue3', lwd=2)
+lines(xgrid, 0.5 * dnorm(xgrid, 0, tau) + 0.5 * dnorm(xgrid, 0, c*tau), col= 'darkorchid2', type='l', lwd=2)
+legend('topright', c("Spike", "Slab", "Mixture"), col = c('firebrick2', 'dodgerblue3', 'darkorchid2'), lty = rep(1, 3), lwd = 2)
+abline(v=c(-delta, delta), col='turquoise',lwd=2, lty=2)
+```
+
+In the figure above, we can see a spike and slab setting . The degree of separation between the two distributions depends on the two parameters $c$ and $\tau$, where $\tau^2$ and $c^2 \tau^2$ are the variances of the spike and of the slab, respectively. In general, $\tau$ is chosen to be small and $c$ is set in order to make $c^2 \tau^2$ large enough. A more formal way to select those hyperparameters is to look at the intersection of the two distributions, which occurs at the points $\pm \delta_k = \tau_k \epsilon_k$, where $\epsilon_k = \sqrt{2 (\log c_k) c_k^2/(c_k^2 - 1)}$. The points $\pm \delta_k$, shown in vertical blue lines in the figure above, can be interpreted as a threshold to declare the corresponding $\beta_k$ significant.
+
+By collapsing the first two lines of the hierarchical prior setting we can rewrite the model as 
+\begin{align*}
+Y | &\boldsymbol{\beta}, \sigma^2 \sim N(X \boldsymbol{\beta}, \sigma^2 I)
+\\
+&\boldsymbol{\beta} | \boldsymbol{\gamma} \sim N(\mathbf{0}, D)
+\\
+&\gamma_k | w_k \sim \text{Be} (w_k)
+\\
+&w_k \sim \mathcal{U} (0, 1)
+\\
+&\sigma^2 \sim \text{IG}\left(\dfrac{\nu}{2}, \dfrac{\nu \lambda}{2}\right)
+\end{align*}
+where 
+$$D_{kk} = \begin{cases}
+c_k^2 \tau_k^2 & \text{if } \gamma_k = 1
+\\
+\tau_k^2 & \text{if } \gamma_k = 0
+\end{cases}.$$
+
+In the original paper, @george1993variable propose a more general setting in which the covariance matrix for $\boldsymbol{\beta}$ is allowed to be non-diagonal, but we will here assume that the prior correlation matrix is diagonal. 
+
+Given this model, it is straightforward to implement a Gibbs Sampler to get a MCMC chain for the posterior. Hence we have:
+
+ + the full conditional for the regression parameters is simply a normal-normal update, that is, 
+ \begin{align*}
+p(\boldsymbol{\beta} | \mathbf{y}, \sigma^2, \boldsymbol{\gamma}) &\propto p(\mathbf{Y} | \boldsymbol{\beta}, \sigma^2) p(\boldsymbol{\beta} | \boldsymbol{\gamma})
+\\
+&=\exp \left\{ - \dfrac{1}{2 \sigma^2} (\mathbf{y} - X \boldsymbol{\beta})^T (\mathbf{y} - X \boldsymbol{\beta}) \right\} \exp \left\{ - \dfrac{1}{2} \boldsymbol{\beta}^T D^{-1} \boldsymbol{\beta} \right\}
+\\
+&=N\left( \mathbf{m}^\star, \Sigma^\star \right),
+\end{align*}
+where $\Sigma^\star = \left( \dfrac{X^T X}{\sigma^2} + D^{-1} \right)^{-1}$ and $m^\star = \Sigma^\star \dfrac{X^T \mathbf{y}}{\sigma^2}$.
+
+ + the full conditionals for the binary variable denoting the inclusion/exclusion of the variables from the model are
+ \begin{align*}
+p(\gamma_k = 1 | \beta_k, w_k) &\propto p(\beta_k | \gamma_k = 1) p(\gamma_k = 1 | w_k)
+\\
+&=w_k \cdot N(0, c_k^2 \tau_k^2).
+\end{align*}
+
+ + the full conditional for the model variance is 
+ \begin{align*}
+p(\sigma^2 | \mathbf{y}, \boldsymbol{\beta}) &\propto p(\mathbf{Y} | \boldsymbol{\beta}, \sigma^2) p(\sigma^2)
+\\
+&= \left( \dfrac{1}{\sigma^2} \right)^{n/2} \exp \left\{ - \dfrac{1}{2 \sigma^2} (\mathbf{y} - X \boldsymbol{\beta})^T (\mathbf{y} - X \boldsymbol{\beta}) \right\} \left( \dfrac{1}{\sigma^2} \right)^{\nu/2 + 1} \exp \left\{ - \dfrac{\nu \lambda}{2 \sigma^2} \right\}
+\\
+&=\text{IG} \left( \dfrac{n + \nu}{2}, \dfrac{\nu \lambda + ||\mathbf{Y} - X \boldsymbol{\beta}||_2^2}{2} \right).
+\end{align*}
+
+ + the full conditional for the prior probabilities of inclusion are
+ \begin{align*}
+p(w_k | \gamma_k) &\propto p(\gamma_k | w_k) p(w_k)
+\\
+&= w_k^{\gamma_k} (1 - w_k)^{1 - \gamma_k} \mathcal{I}_{[0, 1]} (w_k)
+\\
+&= \text{Beta} \left( \gamma_k + 1, 2 - \gamma_k \right).
+\end{align*}
+
+### Normal Mixture of Inverse Gammas (NMIG)
+
+Differently from the previous approach, @ishwaran2005spike suggest to move the spike and slab prior down the hierarchy and to put it on the variances rather than directly on the regression coefficients. In other words, 
+\begin{align*}
+&\beta_k | \lambda_k \sim N(0, \lambda_k)
+\\
+&\lambda_k | \omega_0, \omega_1, \gamma_k, a, b\sim (1 - \gamma_k) \text{IG} \left( a, \dfrac{\omega_0}{b} \right) + \gamma_k \text{IG} \left( a, \dfrac{\omega_1}{b} \right) 
+\\
+&\gamma_k | w_k \sim \text{Be} (w_k)
+\\
+&w_k \sim \mathcal{U} (0, 1)
+\end{align*}
+
+Therefore, the marginal prior for the regression coefficients obtained by integrating out the variance $\lambda_k$ is a mixture of two scaled t-distributions. The hyperparameters $\omega_0$ and $\omega_1$ play now the role of $\tau^2$ and $c^2$ in the SVSS setting.
+
+
+## A high-dimensional extension of the Spike and Slab prior
+
+In @rovckova2014emvs it is proposed a new approach that allows to perform Maximum a Posteriori estimation for the variable selection problem in high dimensions. In particular, the deterministic EMVS (EM for variable selection) algorithm that is proposed is ideal in a $p > n$ setting. Indeed, the EM algorithm rapidly identifies high posterior models and avoids the slow mixing of the Gibbs SVSS alternative. 
+
+The sampling model for this formulation is the same just described, that is the spike and slab prior setting introduced in @george1993variable. For the sake of notation, let us denote with $\nu_0$ and $\nu_1$ the variances of the spike and of the slab, respectively (before we used $\tau^2$ and $c^2 \tau^2$). 
+
+\begin{align*}
+Y | &\boldsymbol{\beta}, \sigma^2 \sim N(X \boldsymbol{\beta}, \sigma^2 I)
+\\
+&\boldsymbol{\beta} | \boldsymbol{\gamma} \sim N(\mathbf{0}, D)
+\\
+&\gamma_k | \theta \sim \text{Be} (\theta)
+\\
+&\theta \sim \text{Beta} (a, b)
+\\
+&\sigma^2 \sim \text{IG}\left(\dfrac{\nu}{2}, \dfrac{\nu \lambda}{2}\right)
+\end{align*}
+where 
+$$D_{kk} = \begin{cases}
+\nu_1 & \text{if } \gamma_k = 1
+\\
+\nu_0 & \text{if } \gamma_k = 0
+\end{cases}.$$
+
+The EM algorithm then proceeds by maximizing an averaged version of the log-likelihood, by treating the latent $\gamma_k$'s as ''missing data''. The E-step consists in replacing the unknown $\gamma_k$ with their conditional expectation given the observed data and current parameter estimates. The following M-step consists in a simple maximization of the log-likelihood obtained after the E-step. 
+
+The maximization problem is 
+$$\text{argmax}_{\boldsymbol{\beta}, \theta, \sigma} \text{E}_{\boldsymbol{\gamma} | \cdot} \left[ \log \pi(\boldsymbol{\beta}, \theta, \sigma, \boldsymbol{\gamma} | \mathbf{y}) | \boldsymbol{\beta}^{(k)}, \theta^{(k)}, \sigma^{(k)}, \mathbf{y} \right].$$
+By ignoring the terms that do not involve the variables that we are maximizing, we can rewrite the objective function as 
+\begin{align*}
+&\text{E}_{\boldsymbol{\gamma} | \cdot} \left[ \log \pi(\boldsymbol{\beta}, \theta, \sigma, \boldsymbol{\gamma} | \mathbf{y}) | \boldsymbol{\beta}^{(k)}, \theta^{(k)}, \sigma^{(k)}, \mathbf{y} \right]
+\\
+=& - \dfrac{n-1}{2} \log \sigma^2 - \dfrac{(\mathbf{y} - X \boldsymbol{\beta})^T (\mathbf{y} - X \boldsymbol{\beta})}{2 \sigma^2} 
+\\
+&- \dfrac{p}{2} \log \sigma^2 - \dfrac{1}{2 \sigma^2} \sum_{i=1}^{p} \left\{ \beta_i^2 \text{E}_{\boldsymbol{\gamma} | \cdot} \left[ \dfrac{1}{(1 - \gamma_i) \nu_0 + \gamma_i \nu_1} \right] \right\} 
+\\
+&- \dfrac{\nu + 2}{2} \log \sigma^2 - \dfrac{\nu \lambda}{2 \sigma^2}
+\\
+&+ \sum_{i=1}^p \log \left( \dfrac{\theta}{1 - \theta} \right) \text{E}_{\boldsymbol{\gamma} | \cdot} \left[ \gamma_i \right] + (a-1) \log \theta + (p+b-1) \log (1 - \theta)
+\\
+=& - \dfrac{n+1+p+\nu}{2} \log \sigma^2 - \dfrac{(\mathbf{y} - X \boldsymbol{\beta})^T (\mathbf{y} - X \boldsymbol{\beta})}{2 \sigma^2} - \dfrac{1}{2 \sigma^2} \sum_{i=1}^{p} \left\{ \beta_i^2 \text{E}_{\boldsymbol{\gamma} | \cdot} \left[ \dfrac{1}{(1 - \gamma_i) \nu_0 + \gamma_i \nu_1} \right] \right\} - \dfrac{\nu \lambda}{2 \sigma^2}
+\\
+&+ \sum_{i=1}^p \log \left( \dfrac{\theta}{1 - \theta} \right) \text{E}_{\boldsymbol{\gamma} | \cdot} \left[ \gamma_i \right] + (a-1) \log \theta + (p+b-1) \log (1 - \theta).
+\end{align*}
+The E-step consists in computing 
+\begin{align*}
+&\text{E}_{\boldsymbol{\gamma} | \cdot} \gamma_i = P(\gamma_i = 1 | \boldsymbol{\beta}^{(k)}, \theta^{(k)}, \sigma^{(k)}) = p_i^\star = \dfrac{a_i}{a_i + b_i}
+\\
+&\text{E}_{\boldsymbol{\gamma} | \cdot} \left[ \dfrac{1}{\nu_0 (1 - \gamma_i) + \nu_1 \gamma_i} \right] = \dfrac{\text{E}_{\boldsymbol{\gamma} | \cdot} (1 - \gamma_i)}{\nu_0} + \dfrac{\text{E}_{\boldsymbol{\gamma}| \cdot} \gamma_i}{\nu_1} = \dfrac{1 - p_i^\star}{\nu_0} + \dfrac{p_i^\star}{\nu_1}
+\end{align*}
+where $a_i = \pi(\beta_i^{(k)} | \sigma^{(k)}, \gamma_i = 1) \cdot \theta^{(k)}$ and $b_i = \pi(\beta_i^{(k)} | \sigma^{(k)}, \gamma_i = 0) \cdot (1 - \theta^{(k)})$.
+
+The subsequent M-step is analytically tractable and yields to simple expressions: 
+
++ The maximization w.r.t. $\boldsymbol{\beta}$ is the same problem of Ridge regression, i.e.
+\begin{align*}
+\boldsymbol{\beta}^{(k+1)} &= \text{argmin}_{\boldsymbol{\beta} \in \mathbb{R}^p} \left\{ ||\mathbf{y} - X \boldsymbol{\beta}||^2 + ||D^{\star 1/2} \boldsymbol{\beta}||^2 \right\}
+\\
+&=(X^T X + D^\star)^{-1} X^T \mathbf{y},
+\end{align*}
+where $D^{\star} = \text{diag} \{d_i^\star\}$.
+
++ The maximization w.r.t. $\sigma$ yields to
+\begin{align*}
+\sigma^{(k+1)} = \sqrt{\dfrac{||\mathbf{y} - X \boldsymbol{\beta}^{(k+1)}|| + ||D^{\star 1/2} \boldsymbol{\beta}^{(k+1)}||^2 + \nu \lambda}{n+p+\nu}}.
+\end{align*}
+
++ The maximization w.r.t. $\theta$ implies
+\begin{align*}
+\theta^{(k+1)} = \dfrac{\sum_{i=1}^p p_i^\star + a - 1}{a+b+p-2}.
+\end{align*}
+
+Eventually, the submodel $\widehat{\boldsymbol{\gamma}}$ is defined as the model maximizing $$P(\boldsymbol{\gamma} | \widehat{\boldsymbol{\beta}}, \widehat{\sigma}, \widehat{\theta}) = \prod_{i=1}^p P(\gamma_i | \widehat{\beta}_i, \widehat{\sigma}, \widehat{\theta}).$$ 
+In our prior setting, it is easy to show that 
+$$P(\gamma_i | \widehat{\beta}_i, \widehat{\sigma}, \widehat{\theta}) = \dfrac{c_i}{c_i + d_i}$$
+where $c_i = \pi(\widehat{\beta}_i | \widehat{\sigma}, \gamma_i = 1) \cdot \widehat{\theta}$ and $d_i = \pi(\widehat{\beta}_i | \widehat{\sigma}, \gamma_i = 0) \cdot (1 - \widehat{\theta})$. Therefore we include the variable $k$ if and only if $P(\gamma_k | \widehat{\boldsymbol{\beta}}, \widehat{\sigma}, \widehat{\theta}) > 0.5$.
+
+## Results
+
+We here present the application of three of the previously discussed algorithms on some datasets. In particular, we implement the original approach by @mitchell1988bayesian and the SVSS Gibbs sampler algorithm of @george1993variable in order to do variable selection in low dimension. Moreover, a version of the EMVS algorithm discussed in @rovckova2014emvs is applied to a simulated dataset, replicating the analysis shown in the paper. 
+
+While the main code to run can be found in this markdown, the functions that implement the three analyses can be found in the Github repository.
+
+
+### Prostate cancer data
+
+The prostate cancer data come from a study that examined the correlation between the level of prostate specific antigen (*lpsa*) and a number of clinical measures in $97$ men who were about to receive a radical prostatectomy. The $8$ predictors are log cancer volume (*lcavol*), log prostate weight (*lweight*), *age*, log of the amount of benign prostatic hyperplasia (*lbph*), seminal vesicle invasion (*svi*), log of capsular penetration (*lcp*), Gleason score (*gleason*), and percent of Gleason scores 4 or 5 (*pgg45*). 
+
+First, we import the dataset and we center and standardize the numerical variables.
+```{r, echo = T}
+rm(list=ls())
+source('Code/Mitchell_1988_fun.R')
+
+# Load the data
+X <- read.table('./Data/prostate.txt')[,1:8]
+y <- read.table('./Data/prostate.txt')[,9]
+
+n <- nrow(X)
+p <- ncol(X)
+
+# We need to center and standardize the variables that are not categorical
+X[,-5] <- as.matrix(scale(X[,-5]))
+# We do not need to center and scale the response variable
+
+# X does not include the intercept: it will be included in the function that computes 
+# the posterior distributions for each model. We here assume that the intercept is 
+# exempt from deletion
+```
+
+Following the original approach by @mitchell1988bayesian, we compute the posterior probability for each one of the $2^p$ models. In the following we use $\phi_j = \phi, \forall j = 1, \dots, 2^p$, which corresponds to setting the same spike and slab prior for every predictor. 
+
+The Median Probability Model criterion consists in retaining the variables that have a probability of inclusion larger than $0.5$. Those probabilities, $\forall i = 1, \dots, p$, are computed by summing over all possible models that include the variable $\beta_i$.
+
+```{r, echo = T}
+# Choose a value for the penalty parameter (ratio of the heights of the spike and of the 
+# slab)
+gamma <- 5
+wi <- post.prob.model(X, y, gamma)$wi
+# The model 0 (wi[1]) is the model with the only intercept, the model 1 (wi[2]), the one 
+# with intercept and beta_1, ...
+
+
+# ========================
+# MEDIAN PROBABILITY MODEL
+# ========================
+# Retain the variables whose posterior probability of being
+# nonzero is larger than 0.5
+post.prob <- array(NA, dim = p)
+for (j in 1:p){
+  post.model <- post.prob.model(X, y, gamma)
+  wi <- post.model$wi
+  select <- post.model$select
+  post.prob[j] <- sum(wi[which(select[,j] == 1)])
+}
+par(mar=c(4,4,2,2), cex = 1.1, family = 'Palatino')
+barplot(post.prob, names.arg=1:p, xlab = "Variable", ylab = "Probability")
+abline(h = 0.5, lwd = 2, lty = 4, col = 'firebrick2')
+```
+
+We see that with this criterion the variables $1$, $2$ and $5$ (plus the intercept, which is in every model) are included. Alternatively, we can choose the model with the largest posterior density, i.e. $p(\boldsymbol{\gamma} | \mathbf{y})$.
+
+```{r, echo = T}
+# =========================
+# HIGHEST POSTERIOR DENSITY
+# =========================
+# Take the model with highest posterior density
+# Visualize the posterior probabilities for each model
+par(mar=c(4,4,2,2), cex = 1.1, family = 'Palatino')
+plot(1:2^p-1, wi, type = 'h', lwd = 2, xlab = 'Model', ylab = 'Posterior Probability')
+```
+
+The result is model number $20$. How can we know the variables which correspond to it? Let us discuss here a common strategy used to enumerate the models from $1$ to $2^p$. Usually, a mapping between the integer numbers (possible models) and the corresponding binary number is introduced. The binary sequence of $1$ and $0$ will denote whose variables are included.
+
+```{r, echo = T}
+# Find the optimal model (we need to convert the model number to binary number in order 
+# to understand which variables have been selected)
+opt.model <- which.max(wi)
+opt.model
+```
+
+The model $20$, that is actually the model $19$ since in R we denote with $1$ the model with the only intercept, correponds to the binary number $00010011$. Reversing this sequence we get $11001000$, which correponds to the same model obtained via MPM.
+
+```{r, echo = T}
+as.binary(opt.model - 1, p)[p:1]
+```
+
+One can also inspect how the behaviour of the variable selection changes according to the parameter $\phi$. Remember that for small values of $\phi$, that is when spike and slab have similar height (or when the spike is less high than the slab), the selection is negligible. As soon as the height of the spike is increased, the model is more and more parsimonious and will tend to shrink some of the coefficients close to $0$.
+
+```{r, echo = T}
+# Let us now plot how the variable selection behaves according to the penalty parameter
+# gamma: 
+# first compute the posterior probabilities for each beta according to the gamma value
+gamma.grid <- exp(seq(-3, 3, length.out = 10))
+post.prob <- array(NA, dim = c(length(gamma.grid), p))
+for (i in 1:length(gamma.grid)){
+  for (j in 1:p){
+    post.model <- post.prob.model(X, y, gamma.grid[i])
+    wi <- post.model$wi
+    select <- post.model$select
+    post.prob[i,j] <- sum(wi[which(select[,j] == 1)])
+  }
+}
+
+# Then plot how the posterior probability of each beta changes according to the value
+# of gamma
+par(mar=c(4,4.2,2,2), family = 'Palatino', cex = 1.1)
+cols <- colorRampPalette(brewer.pal(9, "Set1"))(p)
+plot(gamma.grid, post.prob[,1], type = 'b', pch = 16, cex = 0.6, ylim = c(0,1), col = cols[1], xlab = bquote(gamma), ylab = bquote(P(beta[j] != 0)))
+lines(gamma.grid, post.prob[,1], lwd = 2, col = cols[1])
+text(x = gamma.grid[length(gamma.grid)] + 0.5, y = post.prob[length(gamma.grid),1], labels = 1, col = cols[1], cex = 0.7, lwd = 3)
+for (j in 2:p){
+  lines(gamma.grid, post.prob[,j], type = 'b', pch = 16, cex = 0.7, col = cols[j])
+  lines(gamma.grid, post.prob[,j], lwd = 2, col = cols[j])
+  text(x = gamma.grid[length(gamma.grid)] + 0.5, y = post.prob[length(gamma.grid),j], labels = bquote(.(j)), col = cols[j], cex = 0.7, lwd = 3)
+}
+```
+
+We see that for almost every value of $\phi$, the same three selected variables obtained before result from the algorithm. 
+
+We now focus on the SVSS Gibbs sampler for model selection previously described [see @george1993variable]. We run the MCMC for $30000$ iterations, we discard the first $5000$ as a burnin and we thin every $5$ iterations. 
+
+```{r, echo = T}
+rm(list=ls())
+source('Code/George_1993_fun.R')
+
+# Load the data
+X <- read.table('./Data/prostate.txt')[,1:8]
+y <- read.table('./Data/prostate.txt')[,9]
+
+n <- nrow(X)
+p <- ncol(X)
+
+# We need to center and standardize the variables that are not categorical
+X[,-5] <- as.matrix(scale(X[,-5]))
+# We add an intercept
+X <- as.matrix(cbind(rep(1, n), X))
+# We do not need to center and scale the response variable
+
+# Delta is the threshold to declare a beta_i significant
+delta <- 0.1
+c <- 10
+
+# We compute consequently tau
+eps <- sqrt(2*log(c)*c^2/(c^2-1))
+tau <- delta/eps
+
+# MCMC setting
+Niter <- 30000
+burnin <- 5000
+thin <- 5
+
+# Hyperparameters for the precision lambda
+nu0 <- 1
+lambda0 <- 1
+
+SVSS <- gibbs.SVSS(X, y, c, tau, nu0, lambda0, Niter, burnin, thin)
+
+gammas.post <- apply(SVSS$gammas.chain, 2, mean)
+```
+
+Again, we can use median probability model in order to evaluate whose variables have a probability of inclusion larger than $0.5$.
+
+```{r, echo = T}
+# ========================
+# MEDIAN PROBABILITY MODEL
+# ========================
+# Retain the variables whose posterior probability of being
+# nonzero is larger than 0.5: just analyze the posterior mean of the gamma_i's
+par(mar=c(4,4,2,2), cex = 1.1, family = 'Palatino')
+barplot(gammas.post[2:(p+1)], names.arg=1:p, xlab = "Variable", ylab = "Probability")
+abline(h = 0.5, lwd = 2, lty = 4, col = 'firebrick2')
+```
+
+Or, by highest posterior density, we can find the most visited model along the iterations of the chain. 
+
+```{r, echo = T}
+# =========================
+# HIGHEST POSTERIOR DENSITY
+# =========================
+# Take the model with highest posterior density
+# Visualize the posterior probabilities for each model
+# These three lines convert the 01's sequences in the model numbers
+pot <- c(0, 2^(1:p-1))
+dec <- SVSS$gammas.chain%*%pot
+# The model 0 is the model with the only intercept, the model 1, the one 
+# with intercept and beta_1, ...
+
+# Plot the probability for each model
+dec <- factor(dec, levels = 1:2^p-1)
+par(mar=c(4,4,2,2), cex = 1.1, family = 'Palatino')
+plot(1:2^p-1, as.numeric(table(dec)/length(dec)), type = 'h', lwd = 2, xlab = 'Model', ylab = 'Posterior Probability')
+```
+
+```{r, echo = T}
+# Find the top10 models
+dec.top10 <- as.numeric(names(sort(table(dec), decreasing=T)))[1:10]
+
+# Find the optimal model and convert it to binary
+opt.model <- dec.top10[1]
+bin.max <- as.binary(opt.model, p)[p:1]
+bin.max
+```
+
+The two methods give the same answer, that is the model $11001000$.
+
+```{r, echo = T}
+length(table(dec)) # number of visited models: it will change according to c and tau
+```
+
+We see here that the Gibbs sampler algorithm visits all of the possible $2^p = 256$ models. A possible controversy is that in large $p$ settings, the MCMC chain will not visit every possible model. Moreover, the Gibbs sampler for SVSS is known to suffer from slow mixing. Therefore, a new approach has to be envisaged in order to do variable selection in high dimension.
+
+To conclude the review of SVSS, let us mention that another alternative to select the variables is simply perform hard shrinkage. In other words, one can look at the posterior $95\%$ credible intervals and see if $0$ falls in the interval. Then, one can set to $0$ the $\beta_i$ such that the corresponding CI contains $0$.
+
+```{r, echo = T}
+# ==============
+# HARD SHRINKAGE
+# ==============
+# Just look at the marginal posterior densities for each beta and see
+# if the 0 is in the CI 95%
+
+betas.quant <- apply(SVSS$betas.chain, 2, quantile, prob = c(0.025, 0.5, 0.975))
+
+par(mar = c(4,4,2,2), family = 'Palatino', cex = 1.1)
+plotCI(1:p, betas.quant[2,2:(p+1)], ui = betas.quant[3,2:(p+1)], li = betas.quant[1,2:(p+1)], pch=c(rep(21,p)), scol='dodgerblue2', col = 'dodgerblue2', lwd=2, 
+       xaxt = 'n', ylab='', xlab = '')
+axis(1, at = 1:p, labels = as.expression(c(bquote(beta[1]), bquote(beta[2]), bquote(beta[3]), bquote(beta[4]), 
+                                           bquote(beta[5]), bquote(beta[6]), bquote(beta[7]), bquote(beta[8]))))
+abline(h=0, lwd = 2, lty = 2, col='firebrick2')
+```
+
+In this application, we see that we recover once again the same model, i.e. only $\beta_1$, $\beta_2$ and $\beta_5$ are significant.
+
+
+### Variable selection in high dimensions
+
+In order to present the validity of the algorithm, we apply it to the same simulated data proposed in the paper, consisting of $n = 100$ observations and $p = 1000$ predictors. Predictor values for each observation were simulated from $N_p(0, \Sigma)$ where $\Sigma  = (\rho_{ij})_{i,j=1}^p$, with $\rho_{ij} = 0.6^{|i−j|}$. Response values were then generated according to the linear model $\mathbf{y} = X \boldsymbol{\beta} + \boldsymbol{\epsilon}$, where $\boldsymbol{\beta} = (3,2,1,0,0,...,0)^T$ and $\boldsymbol{\epsilon} \sim N_n(0,\sigma^2 I_n)$ with $\sigma^2 = 3$. The same kind of analysis would be unfeasible using SVSS for computational reasons. 
+
+```{r, eval = F}
+rm(list=ls())
+source('Code/Rockova_2014_fun.R')
+
+n <- 100
+p <- 1000
+
+# Data generation
+Sigma <- array(NA, dim = c(p, p))
+for (i in 1:p){
+  for (j in 1:p){
+    Sigma[i,j] <- 0.6^(abs(i - j))
+  }
+}
+
+beta <- rep(0, p)
+beta[1] <- 3
+beta[2] <- 2
+beta[3] <- 1
+sigma <- sqrt(3)
+
+X <- rmvnorm(n, mean = rep(0, p), sigma = Sigma)
+y <- rnorm(n, mean = X %*% beta, sd = sigma)
+
+# Choice of hyperparameters
+a <- b <- 1
+nu <- lambda <- 1
+nu0 <- 0.5
+nu1 <- 100
+maxiter <- 50
+  
+nu0.grid <- seq(0.05, 0.5, by = 0.01)
+betas <- array(NA, dim = c(length(nu0.grid), p))
+thresh <- array(NA, dim = length(nu0.grid))
+for (i in 1:length(nu0.grid)){
+  fit <- EMVS(X, y, nu0.grid[i], nu1, a, b, nu, lambda, maxiter)
+  Niter <- length(fit$sigma.chain)
+  betas[i,] <- fit$betas.chain[Niter,]
+  c2 <- nu1/nu0.grid[i]
+  thresh[i] <- fit$sigma.chain[Niter] * sqrt(2 * nu0.grid[i] * log(sqrt(c2) * (1 - fit$theta.chain[Niter]) / fit$theta.chain[Niter]) * c2/(c2 - 1))
+}
+```
+
+
+Given the speed of the algorithm, one can run the EMVS procedure for several values of $\nu_0$ ($\nu_1$ is fixed to $1000$ in this example), yielding to the regularization plot shown below.
+
+```{r, echo = F}
+load('EMVSplot.Rdata')
+matplot(nu0.grid, betas, type = 'b', lwd = 2, pch = 16, cex = 0.8, ylim = c(-1,3.5), xlab = bquote(nu[0]), ylab = bquote(beta))
+lines(nu0.grid, thresh, lwd = 2, col = 'goldenrod2')
+lines(nu0.grid, - thresh, lwd = 2, col = 'goldenrod2')
+```
+
+As $\nu_0$ increases, more variables fall within the $\pm \beta_i^\star$ threshold limits depicted by the two yellow lines, and the estimates of the large effects stabilize. Thus, the true model is recovered, i.e. $\beta_1 = 3, \beta_2 = 2, \beta_3 = 1, \beta_i = 0 \text{ } \forall i > 3$. It is worth noting the difficulty of subset identification when $\nu_0$ is small and no clear model emerges.
+
+## Discussion
+
+In this project a review of Bayesian methods for variable selection in the context of linear regression models was presented. After a summary of the classical techniques in literature, a focus was brought on a method, called EMVS, able to deal with high dimensional data. This deterministic method allows to perform MAP estimation and to recover a point estimate for the optimal model in a high dimensional context, where any stochastic alternative would be computationally infeasible. 
+
+## References
+
