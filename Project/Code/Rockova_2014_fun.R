@@ -7,11 +7,13 @@ EMVS <- function(X, y, nu0, nu1, a, b, nu, lambda, Niter, tol = 1E-10){
   # Args: 
   #   - X: design matrix
   #   - y: response vector
-  #   - c, tau: spike and slab parameters
-  #   - nu0, lambda0: precision gamma hyperparameters
-  #   - Niter, burnin, thin: Gibbs parameters
+  #   - nu0, nu1: spike and slab parameters
+  #   - a, b: hyperparameters for the prior probability of inclusion
+  #   - nu, lambda: precision gamma hyperparameters
+  #   - Niter: number of iterations
+  #   - tol: convergence tolerance
   # Returns: 
-  #   - MCMC of the joint posterior
+  #   - list of parameters at each iteration
   # -------------------------------
   n <- nrow(X)
   p <- ncol(X)
